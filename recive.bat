@@ -3,7 +3,7 @@ setlocal EnableExtensions
 title Kadad File Downloader Client
 
 REM ====== CHANGE THESE TWO VALUES ======
-set "KADAD_SERVER=http://YOUR_VPS_IP:3000"
+set "KADAD_SERVER=http://185.206.93.224:3000"
 set "KADAD_CLIENT_PASSWORD=admin"
 REM =====================================
 
@@ -17,7 +17,7 @@ exit /b
 $ErrorActionPreference='Stop'
 $server=$env:KADAD_SERVER
 $pass=$env:KADAD_CLIENT_PASSWORD
-if([string]::IsNullOrWhiteSpace($server) -or $server -match 'YOUR_VPS_IP'){ Write-Host 'Set KADAD_SERVER in receive.bat first.' -ForegroundColor Red; pause; exit }
+if([string]::IsNullOrWhiteSpace($server)){ Write-Host 'KADAD_SERVER is empty.' -ForegroundColor Red; pause; exit }
 $root=Join-Path $env:USERPROFILE 'Desktop\received'
 New-Item -ItemType Directory -Force -Path $root | Out-Null
 $idFile=Join-Path $PSScriptRoot 'client-id.txt'
@@ -26,7 +26,6 @@ if(Test-Path $idFile){$clientId=(Get-Content $idFile -Raw).Trim()}else{$clientId
 if(Test-Path $memFile){try{$mem=Get-Content $memFile -Raw|ConvertFrom-Json}catch{$mem=@{}}}else{$mem=@{}}
 if($mem -isnot [pscustomobject]){$mem=[pscustomobject]@{}}
 function Api($method,$url,$data=$null){
-  $h=@{'x-client-password'=$pass;'x-client-id'=$clientId}
   $args=@('-sS','-X',$method,'-H',"x-client-password: $pass",'-H',"x-client-id: $clientId")
   if($null-ne$data){$json=$data|ConvertTo-Json -Compress -Depth 5;$args+=@('-H','Content-Type: application/json','--data-raw',$json)}
   $out=& curl.exe @args "$url"
@@ -44,12 +43,11 @@ function Folders{
 }
 function SafeName($n){if([string]::IsNullOrWhiteSpace($n)){$n='download'};return ($n -replace '[<>:"/\\|?*]','_')}
 function Download($x){
-  $folder=$x.folder
   $dest=$root
-  if($folder){$parts=$folder -split '/'|Where-Object{$_ -and $_ -ne '.' -and $_ -ne '..'};foreach($part in $parts){$dest=Join-Path $dest $part}}
+  if($x.folder){foreach($part in ($x.folder -split '/'|Where-Object{$_ -and $_ -ne '.' -and $_ -ne '..'}){$dest=Join-Path $dest $part}}
   New-Item -ItemType Directory -Force -Path $dest|Out-Null
   $file=Join-Path $dest (SafeName $x.name)
-  if(Test-Path $file){return}
+  if(Test-Path $file){Api POST "$server/api/v1/progress" @{id=$x.id;progress=100;status='downloaded'}|Out-Null;return}
   Api POST "$server/api/v1/progress" @{id=$x.id;progress=0;status='downloading'}|Out-Null
   try{
     & curl.exe -L --fail --silent --show-error --output "$file" "$($x.url)"
@@ -65,6 +63,7 @@ function Download($x){
   }
 }
 Write-Host 'Kadad File Downloader Client'
+Write-Host "Server: $server"
 Write-Host "Receive folder: $root"
 while($true){
   try{
@@ -73,11 +72,11 @@ while($true){
       try{
         if($c.type -eq 'mkdir'){
           $d=$root
-          foreach($part in ($c.folder -split '/'|Where-Object{$_ -and $_ -ne '.' -and $_ -ne '..'})){$d=Join-Path $d $part}
+          foreach($part in ($c.folder -split '/'|Where-Object{$_ -and $_ -ne '.' -and $_ -ne '..'}){$d=Join-Path $d $part}
           New-Item -ItemType Directory -Force -Path $d|Out-Null
         }elseif($c.type -eq 'rmdir' -and $c.folder){
           $d=$root
-          foreach($part in ($c.folder -split '/'|Where-Object{$_ -and $_ -ne '.' -and $_ -ne '..'})){$d=Join-Path $d $part}
+          foreach($part in ($c.folder -split '/'|Where-Object{$_ -and $_ -ne '.' -and $_ -ne '..'}){$d=Join-Path $d $part}
           if(Test-Path $d){Remove-Item $d -Recurse -Force}
         }
         Api POST "$server/api/v1/command-done" @{id=$c.id}|Out-Null
